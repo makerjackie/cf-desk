@@ -949,7 +949,7 @@ export function SettingsView() {
                   <div className="relative">
                     <div className="absolute -inset-4 bg-primary/20 blur-2xl rounded-full animate-pulse" />
                     <img
-                      src={theme === "dark" ? "/app-icon-dark.png" : "/app-icon.png"}
+                      src="/app-icon.png"
                       alt="CFDesk"
                       className="w-24 h-24 rounded-3xl shadow-2xl relative border-2 border-white/10"
                       draggable={false}
