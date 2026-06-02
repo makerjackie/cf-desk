@@ -747,6 +747,7 @@ export function R2BucketsView() {
   const [domainRefreshing, setDomainRefreshing] = useState(false);
   const [domainLastUpdated, setDomainLastUpdated] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadPreparing, setUploadPreparing] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [previewObject, setPreviewObject] = useState<R2Object | null>(null);
   const [detailObject, setDetailObject] = useState<R2Object | null>(null);
@@ -798,6 +799,7 @@ export function R2BucketsView() {
     r2SortDirection
   );
   const currentSelectedObjects = selectedObjects(listing?.files ?? [], selectedKeys);
+  const uploadBusy = uploading || uploadPreparing;
   const previewableFiles = filteredFiles.filter((object) => isImageObject(object.key));
   const previewIndex = previewObject
     ? previewableFiles.findIndex((object) => object.key === previewObject.key)
@@ -1238,6 +1240,7 @@ export function R2BucketsView() {
   const uploadSources = useCallback(
     async (sources: UploadSource[]) => {
       if (!selectedBucket || sources.length === 0) return;
+      setUploadPreparing(true);
       setUploading(true);
 
       try {
@@ -1268,11 +1271,14 @@ export function R2BucketsView() {
           item.source.outputSize != null
         );
         if (shouldConfirmPreflight) {
+          setUploadPreparing(false);
           const confirmed = await requestUploadPreflight(preparedUploads);
           if (!confirmed) {
             toast({ title: t("r2.uploadCancelled") });
             return;
           }
+        } else {
+          setUploadPreparing(false);
         }
 
         const uploadResults: Array<{ key: string; ok: boolean; error?: string }> = preparedUploads.map((item) => ({
@@ -1376,6 +1382,7 @@ export function R2BucketsView() {
       } catch (err) {
         toast({ title: t("r2.uploadFailed"), description: String(err), variant: "destructive" });
       } finally {
+        setUploadPreparing(false);
         setUploading(false);
       }
     },
@@ -1418,6 +1425,8 @@ export function R2BucketsView() {
 
   const uploadLocalPaths = useCallback(
     async (paths: string[]) => {
+      if (paths.length === 0) return;
+      setUploadPreparing(true);
       try {
         const sources = await collectLocalPathUploadSources(paths);
         if (sources.length === 0) {
@@ -1427,6 +1436,8 @@ export function R2BucketsView() {
         await uploadSources(sources);
       } catch (err) {
         toast({ title: t("r2.localUploadReadFailed"), description: String(err), variant: "destructive" });
+      } finally {
+        setUploadPreparing(false);
       }
     },
     [t, toast, uploadSources]
@@ -1464,17 +1475,20 @@ export function R2BucketsView() {
   }, [uploadLocalPaths]);
 
   const uploadClipboardImage = useCallback(async () => {
+    setUploadPreparing(true);
     try {
       const file = await clipboardImageToFile();
       await uploadFiles([file]);
     } catch {
       return;
+    } finally {
+      setUploadPreparing(false);
     }
   }, [uploadFiles]);
 
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
-      if (!selectedBucket || uploading) return;
+      if (!selectedBucket || uploadBusy) return;
       const items = Array.from(event.clipboardData?.items ?? []);
       const imageItem = items.find((item) => item.type.startsWith("image/"));
       const file = imageItem?.getAsFile();
@@ -1487,7 +1501,7 @@ export function R2BucketsView() {
 
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
-  }, [selectedBucket, uploadFiles, uploading]);
+  }, [selectedBucket, uploadBusy, uploadFiles]);
 
   useEffect(() => {
     if (!selectedBucket) {
@@ -1500,7 +1514,7 @@ export function R2BucketsView() {
 
     getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (uploading) return;
+        if (uploadBusy) return;
 
         const payload = event.payload;
         if (payload.type === "enter" || payload.type === "over") {
@@ -1536,7 +1550,7 @@ export function R2BucketsView() {
       disposed = true;
       unlisten?.();
     };
-  }, [selectedBucket, uploadLocalPaths, uploading]);
+  }, [selectedBucket, uploadBusy, uploadLocalPaths]);
 
   useEffect(() => {
     if (!selectedBucket || !listing || listing.folders.length === 0) return;
@@ -1822,6 +1836,7 @@ export function R2BucketsView() {
     setDragActive(false);
     if (Date.now() - lastNativeDropAtRef.current < 600) return;
 
+    setUploadPreparing(true);
     try {
       const sources = await collectDroppedUploadSources(event.dataTransfer);
       if (sources.length === 0) {
@@ -1831,12 +1846,14 @@ export function R2BucketsView() {
       await uploadSources(sources);
     } catch (err) {
       toast({ title: t("r2.localUploadReadFailed"), description: String(err), variant: "destructive" });
+    } finally {
+      setUploadPreparing(false);
     }
   };
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (selectedBucket && !uploading) {
+    if (selectedBucket && !uploadBusy) {
       setDragActive(true);
     }
   };
@@ -1849,13 +1866,21 @@ export function R2BucketsView() {
 
   return (
     <div className="relative flex h-full flex-col gap-5">
-      {dragActive && selectedBucket && (
+      {(dragActive || uploadPreparing) && selectedBucket && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-lg bg-background/70 p-6 backdrop-blur-sm">
           <div className="flex min-w-72 flex-col items-center rounded-lg border border-dashed border-primary bg-background px-6 py-5 text-center shadow-lg">
-            <Upload size={24} className="mb-3 text-primary" />
-            <p className="text-sm font-semibold text-foreground">{t("r2.dropToUpload")}</p>
+            {uploadPreparing ? (
+              <Loader2 size={24} className="mb-3 animate-spin text-primary" />
+            ) : (
+              <Upload size={24} className="mb-3 text-primary" />
+            )}
+            <p className="text-sm font-semibold text-foreground">
+              {uploadPreparing ? t("r2.preparingUpload") : t("r2.dropToUpload")}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {t("r2.dropToUploadDesc", { bucket: selectedBucket.name })}
+              {uploadPreparing
+                ? t("r2.preparingUploadDesc")
+                : t("r2.dropToUploadDesc", { bucket: selectedBucket.name })}
             </p>
           </div>
         </div>
@@ -1871,16 +1896,16 @@ export function R2BucketsView() {
             variant="outline"
             size="sm"
             onClick={openUploadDialog}
-            disabled={!selectedBucket || uploading}
+            disabled={!selectedBucket || uploadBusy}
           >
-            {uploading ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Upload size={14} className="mr-2" />}
-            {t("r2.upload")}
+            {uploadBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Upload size={14} className="mr-2" />}
+            {uploadPreparing ? t("r2.preparingUploadShort") : t("r2.upload")}
           </Button>
-          <Button variant="outline" size="sm" onClick={uploadClipboardImage} disabled={!selectedBucket || uploading}>
+          <Button variant="outline" size="sm" onClick={uploadClipboardImage} disabled={!selectedBucket || uploadBusy}>
             <Clipboard size={14} className="mr-2" />
             {t("r2.pasteImage")}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setUrlUploadOpen(true)} disabled={!selectedBucket || uploading}>
+          <Button variant="outline" size="sm" onClick={() => setUrlUploadOpen(true)} disabled={!selectedBucket || uploadBusy}>
             <Globe2 size={14} className="mr-2" />
             {t("r2.uploadUrls")}
           </Button>
@@ -1940,6 +1965,12 @@ export function R2BucketsView() {
                   <Badge variant="secondary" className="h-6 gap-1.5 text-[10px]">
                     <Loader2 size={11} className="animate-spin" />
                     {t("r2.refreshingObjects")}
+                  </Badge>
+                )}
+                {uploadPreparing && (
+                  <Badge variant="secondary" className="h-6 gap-1.5 text-[10px]">
+                    <Loader2 size={11} className="animate-spin" />
+                    {t("r2.preparingUploadShort")}
                   </Badge>
                 )}
                 {objectsLastUpdated && !objectsRefreshing && (
@@ -2780,10 +2811,10 @@ export function R2BucketsView() {
               className="min-h-40 font-mono text-xs"
             />
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setUrlUploadOpen(false)} disabled={uploading}>
+              <Button variant="outline" onClick={() => setUrlUploadOpen(false)} disabled={uploadBusy}>
                 {t("common.cancel")}
               </Button>
-              <Button onClick={submitUrlUpload} disabled={uploading}>
+              <Button onClick={submitUrlUpload} disabled={uploadBusy}>
                 {t("r2.addUrlsToUpload")}
               </Button>
             </div>
