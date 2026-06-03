@@ -99,11 +99,11 @@ export function QueuesView() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<unknown>(null);
 
-  const loadQueues = useCallback(async () => {
+  const loadQueues = useCallback(async (force = false) => {
     setStatus("loading");
     setError(null);
     try {
-      const data = await fetchQueuesOverview();
+      const data = await fetchQueuesOverview({ force, fallbackOnError: !force });
       setOverview(data);
       setSelectedQueueId((current) => current ?? (queueId(data.queues[0]) || null));
       setStatus("idle");
@@ -113,11 +113,11 @@ export function QueuesView() {
     }
   }, []);
 
-  const loadDetail = useCallback(async (id: string) => {
+  const loadDetail = useCallback(async (id: string, force = false) => {
     setDetailStatus("loading");
     setError(null);
     try {
-      const data = await fetchQueueDetail(id);
+      const data = await fetchQueueDetail(id, { force, fallbackOnError: !force });
       setDetail(data);
       setDetailStatus("idle");
     } catch (loadError) {
@@ -208,7 +208,7 @@ export function QueuesView() {
             {t("queues.subtitle")}
           </p>
         </div>
-        <Button variant="outline" onClick={loadQueues} disabled={status === "loading"}>
+        <Button variant="outline" onClick={() => loadQueues(true)} disabled={status === "loading"}>
           {status === "loading" ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RefreshCw size={15} className="mr-2" />}
           {t("common.refresh")}
         </Button>
@@ -275,7 +275,7 @@ export function QueuesView() {
                       <Clipboard size={14} className="mr-2" />
                       {t("queues.copyId")}
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => selectedQueueId && loadDetail(selectedQueueId)} disabled={detailStatus === "loading"}>
+                    <Button variant="ghost" size="icon" onClick={() => selectedQueueId && loadDetail(selectedQueueId, true)} disabled={detailStatus === "loading"}>
                       {detailStatus === "loading" ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
                     </Button>
                   </div>

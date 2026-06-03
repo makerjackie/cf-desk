@@ -96,14 +96,15 @@ export function RemoteOverviewView({ onNavigate }: OverviewProps) {
   const [remoteStatus, setRemoteStatus] = useState<LoadState>("idle");
   const [remoteError, setRemoteError] = useState<string | null>(null);
 
-  const loadRemoteResources = useCallback(async () => {
+  const loadRemoteResources = useCallback(async (force = false) => {
     setRemoteStatus("loading");
     setRemoteError(null);
     try {
+      const cacheOptions = { force, fallbackOnError: !force };
       const [workersData, kvData, queuesData] = await Promise.all([
-        fetchWorkersOverview(),
-        fetchKVNamespaces(),
-        fetchQueuesOverview(),
+        fetchWorkersOverview(cacheOptions),
+        fetchKVNamespaces(cacheOptions),
+        fetchQueuesOverview(cacheOptions),
       ]);
       setWorkers(workersData);
       setKV(kvData);
@@ -152,7 +153,7 @@ export function RemoteOverviewView({ onNavigate }: OverviewProps) {
           onClick={() => {
             d1.refresh();
             r2.refresh();
-            loadRemoteResources();
+            loadRemoteResources(true);
           }}
           disabled={remoteStatus === "loading"}
         >

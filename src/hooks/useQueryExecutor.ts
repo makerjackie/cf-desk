@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { invokeCloudflare, type D1QueryResult } from "./useCloudflare";
+import { clearD1ReadCache, invokeCloudflare, type D1QueryResult } from "./useCloudflare";
 import { useAppStore } from "@/store/useAppStore";
 import { useD1Tracker } from "./useD1Tracker";
 import { invoke } from "@tauri-apps/api/core";
@@ -40,6 +40,7 @@ export function useQueryExecutor(databaseId: string) {
     if (!activeAccount?.id) return null;
     setIsExecuting(true);
     try {
+      const isMutation = checkMutation(sql);
       const results = await executeTrackedQuery(
         {
           accountId: activeAccount.id,
@@ -56,13 +57,14 @@ export function useQueryExecutor(databaseId: string) {
             params: null,
           })
       );
+      if (isMutation) clearD1ReadCache(databaseId);
       return results;
     } finally {
       setIsExecuting(false);
       setShowSafeModeModal(false);
       setPendingQuery("");
     }
-  }, [databaseId, activeAccount?.id, executeTrackedQuery, getTableNameFromSql]);
+  }, [databaseId, activeAccount?.id, executeTrackedQuery, getTableNameFromSql, checkMutation]);
 
   const execute = useCallback(async (sql: string) => {
     setAnalysis(null);
@@ -80,7 +82,7 @@ export function useQueryExecutor(databaseId: string) {
       try {
         // Automatic analysis before execution for SELECT queries
         const analysisResult = await invoke<D1AnalysisResult>("analyze_d1_query", {
-          accountId: "", // This should ideally be passed from a context or config
+          accountId: activeAccount?.id ?? "",
           databaseId,
           sqlQuery: sql,
         });
@@ -96,7 +98,7 @@ export function useQueryExecutor(databaseId: string) {
     }
 
     return await executeActual(sql);
-  }, [databaseId, executeActual, checkMutation, requiresConfirmation]);
+  }, [databaseId, executeActual, checkMutation, requiresConfirmation, activeAccount?.id]);
 
   const confirmExecution = useCallback(async () => {
     if (!pendingQuery) return null;

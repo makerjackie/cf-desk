@@ -29,7 +29,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { AlertTriangle, Info, List, ArrowRight, Expand, BookOpen, X, Check, Table2, Trash2, Undo2 } from "lucide-react";
-import { type D1Column, D1TableSchema, D1ForeignKey, D1QueryResult, invokeCloudflare } from "@/hooks/useCloudflare";
+import { type D1Column, D1TableSchema, D1ForeignKey, D1QueryResult, clearD1ReadCache, invokeCloudflare } from "@/hooks/useCloudflare";
 import { useToast } from "@/components/ui/use-toast";
 import { useAppStore } from "@/store/useAppStore";
 import { useD1Tracker } from "@/hooks/useD1Tracker";
@@ -259,6 +259,7 @@ export function EditColumnDialog({
           throw new Error(failed.error || t("d1.edit.queryFailed"));
         }
       }
+      clearD1ReadCache(databaseId);
       
       toast({
         title: t("common.success"),

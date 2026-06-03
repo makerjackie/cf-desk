@@ -69,11 +69,11 @@ export function KVNamespacesView() {
     [namespaces, selectedNamespaceId]
   );
 
-  const loadNamespaces = useCallback(async () => {
+  const loadNamespaces = useCallback(async (force = false) => {
     setStatus("loading");
     setError(null);
     try {
-      const data = await fetchKVNamespaces();
+      const data = await fetchKVNamespaces({ force, fallbackOnError: !force });
       setNamespaces(data);
       setSelectedNamespaceId((current) => current ?? data[0]?.id ?? null);
       setStatus("idle");
@@ -84,7 +84,7 @@ export function KVNamespacesView() {
   }, []);
 
   const loadKeys = useCallback(
-    async (mode: "reset" | "next" = "reset") => {
+    async (mode: "reset" | "next" = "reset", force = false) => {
       if (!selectedNamespaceId) return;
       setKeyStatus("loading");
       setError(null);
@@ -93,7 +93,8 @@ export function KVNamespacesView() {
           selectedNamespaceId,
           prefix,
           mode === "next" ? cursor : undefined,
-          100
+          100,
+          { force, fallbackOnError: !force }
         );
         setKeys((current) => (mode === "next" ? [...current, ...result.keys] : result.keys));
         setCursor(result.cursor);
@@ -107,13 +108,16 @@ export function KVNamespacesView() {
   );
 
   const loadEntry = useCallback(
-    async (keyName: string) => {
+    async (keyName: string, force = false) => {
       if (!selectedNamespaceId) return;
       setKeyStatus("loading");
       setError(null);
       setSelectedKey(keyName);
       try {
-        const data = await getKVEntry(selectedNamespaceId, keyName);
+        const data = await getKVEntry(selectedNamespaceId, keyName, {
+          force,
+          fallbackOnError: !force,
+        });
         setEntry(data);
         setValueDraft(data.value);
         setKeyDraft(data.key);
@@ -170,8 +174,8 @@ export function KVNamespacesView() {
         entry?.metadata
       );
       setMessage(t("kv.saved"));
-      await loadKeys("reset");
-      await loadEntry(keyDraft.trim());
+      await loadKeys("reset", true);
+      await loadEntry(keyDraft.trim(), true);
       setStatus("idle");
     } catch (saveError) {
       setError(String(saveError));
@@ -196,7 +200,7 @@ export function KVNamespacesView() {
       setEntry(null);
       setValueDraft("");
       setKeyDraft("");
-      await loadKeys("reset");
+      await loadKeys("reset", true);
       setStatus("idle");
     } catch (deleteError) {
       setError(String(deleteError));
@@ -224,7 +228,7 @@ export function KVNamespacesView() {
             {t("kv.inspectSubtitle")}
           </p>
         </div>
-        <Button variant="outline" onClick={loadNamespaces} disabled={status === "loading"}>
+        <Button variant="outline" onClick={() => loadNamespaces(true)} disabled={status === "loading"}>
           {status === "loading" ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RefreshCw size={15} className="mr-2" />}
           {t("common.refresh")}
         </Button>
@@ -278,7 +282,7 @@ export function KVNamespacesView() {
               onSubmit={(event) => {
                 event.preventDefault();
                 setCursor(undefined);
-                loadKeys("reset");
+                loadKeys("reset", true);
               }}
             >
               <Input

@@ -57,6 +57,7 @@ import {
   useD1Schema,
   useD1TableData,
   invokeCloudflare,
+  clearD1ReadCache,
   type D1Database,
   type D1TableSchema,
   type D1Column,
@@ -321,6 +322,7 @@ function DataTab({ databaseId, table, allTables, onTableSelect }: DataTabProps) 
         sqlQuery: sql,
         params,
       });
+      clearD1ReadCache(databaseId);
       setEditingRow(null);
       setEditingRowJson("");
       refresh();

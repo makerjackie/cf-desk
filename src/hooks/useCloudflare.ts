@@ -125,6 +125,39 @@ export type AsyncState<T> =
   | { status: "success"; data: T }
   | { status: "error"; message: string };
 
+function isQueryCacheFresh(timestamp: number) {
+  return Date.now() - timestamp < CACHE_TTL_MS;
+}
+
+function getQueryCacheEntry<T>(cacheKey: string) {
+  return useAppStore.getState().queryCache[cacheKey] as
+    | { data: T; timestamp: number }
+    | undefined;
+}
+
+// Module-level store for the resolved account ID. Most screens can take this
+// from the active account, which avoids repeated account-resolution calls when
+// D1 schema/table queries are opened.
+let resolvedAccountId = "";
+
+export function setResolvedAccountId(id: string) {
+  resolvedAccountId = id;
+}
+
+function getCurrentD1AccountId() {
+  const store = useAppStore.getState();
+  return store.activeAccount?.id ?? store.cloudflareAccountId ?? resolvedAccountId;
+}
+
+export function clearD1ReadCache(databaseId: string) {
+  const store = useAppStore.getState();
+  [
+    `schema_${databaseId}`,
+    `data_${databaseId}_`,
+    `indexes_${databaseId}`,
+  ].forEach((prefix) => store.clearQueryCache(prefix));
+}
+
 // ── Auth hook ──────────────────────────────────────────────────────────────────
 
 export function useCloudflareAuth() {
@@ -162,6 +195,8 @@ export function useCloudflareAccounts() {
       if (!activeAccount) {
         setActiveAccount(accounts[0]);
       }
+      const account = activeAccount ?? accounts[0];
+      if (account?.id) setResolvedAccountId(account.id);
       return;
     }
 
@@ -169,6 +204,7 @@ export function useCloudflareAccounts() {
       .then((list) => {
         setAccounts(list);
         setActiveAccount(list[0] ?? null);
+        if (list[0]?.id) setResolvedAccountId(list[0].id);
       })
       .catch(console.error);
   }, [accounts.length, activeAccount, setAccounts, setActiveAccount]);
@@ -180,39 +216,62 @@ export function useD1Databases() {
   const cached     = useAppStore(selectDatabases) || [];
   const lastFetched = useAppStore(selectLastFetched);
   const setDatabases = useAppStore(selectSetDatabases);
+  const activeAccountId = useAppStore((s) => s.activeAccount?.id ?? s.cloudflareAccountId ?? "");
+  const hasCached = lastFetched !== null;
 
-  // Seed local state from cache immediately (synchronous — no flicker)
+  // Seed local state from cache immediately.
   const [state, setState] = useState<AsyncState<D1Database[]>>(() =>
-    cached.length > 0 && !isCacheStale(lastFetched)
+    hasCached
       ? { status: "success", data: cached }
       : { status: "idle" }
   );
 
   const [isFromCache, setIsFromCache] = useState(
-    cached.length > 0 && !isCacheStale(lastFetched)
+    hasCached
   );
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (activeAccountId) setResolvedAccountId(activeAccountId);
+  }, [activeAccountId]);
 
   /** Always hits the network; use for manual refresh button. */
   const fetchFromApi = useCallback(async () => {
-    setState({ status: "loading" });
+    const store = useAppStore.getState();
+    const fallbackDatabases = store.databases;
+    const hasFallback = store.lastFetched !== null;
+
+    if (hasFallback) {
+      setIsRefreshing(true);
+    } else {
+      setState({ status: "loading" });
+    }
     setIsFromCache(false);
     try {
       const databases = await invokeCloudflare<D1Database[]>("fetch_d1_databases");
       setDatabases(databases);           // write to persistent cache
       setState({ status: "success", data: databases });
+      const accountId = getCurrentD1AccountId();
+      if (accountId) setResolvedAccountId(accountId);
     } catch (err) {
-      setState({ status: "error", message: String(err) });
+      if (hasFallback) {
+        setState({ status: "success", data: fallbackDatabases });
+        setIsFromCache(true);
+      } else {
+        setState({ status: "error", message: String(err) });
+      }
+    } finally {
+      setIsRefreshing(false);
     }
   }, [setDatabases]);
 
   useEffect(() => {
-    // Skip the network hit if the cache is still fresh.
-    if (cached.length > 0 && !isCacheStale(lastFetched)) return;
+    if (lastFetched !== null && !isCacheStale(lastFetched)) return;
     fetchFromApi();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally run once on mount
 
-  return { state, refresh: fetchFromApi, isFromCache };
+  return { state, refresh: fetchFromApi, isFromCache, isRefreshing };
 }
 
 // ── R2 Buckets hook ────────────────────────────────────────────────────────────
@@ -221,19 +280,22 @@ export function useR2Buckets() {
   const cached = useAppStore(selectR2Buckets) || [];
   const lastFetched = useAppStore(selectR2LastFetched);
   const setBuckets = useAppStore(selectSetR2Buckets);
+  const hasCached = lastFetched !== null;
 
   // Seed local state from cache immediately
   const [state, setState] = useState<AsyncState<R2Bucket[]>>(() =>
-    cached.length > 0
+    hasCached
       ? { status: "success", data: cached }
       : { status: "idle" }
   );
 
-  const [isFromCache, setIsFromCache] = useState(cached.length > 0);
+  const [isFromCache, setIsFromCache] = useState(hasCached);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchFromApi = useCallback(async () => {
-    const hasCachedBuckets = useAppStore.getState().r2Buckets.length > 0;
+    const store = useAppStore.getState();
+    const cachedBuckets = store.r2Buckets;
+    const hasCachedBuckets = store.r2LastFetched !== null;
     if (hasCachedBuckets) {
       setIsRefreshing(true);
     } else {
@@ -247,8 +309,7 @@ export function useR2Buckets() {
       setBuckets(buckets);
       setState({ status: "success", data: buckets });
     } catch (err) {
-      const cachedBuckets = useAppStore.getState().r2Buckets;
-      if (cachedBuckets.length > 0) {
+      if (hasCachedBuckets) {
         setState({ status: "success", data: cachedBuckets });
         setIsFromCache(true);
       } else {
@@ -260,7 +321,7 @@ export function useR2Buckets() {
   }, [setBuckets]);
 
   useEffect(() => {
-    if (cached.length > 0 && !isCacheStale(lastFetched)) return;
+    if (lastFetched !== null && !isCacheStale(lastFetched)) return;
     fetchFromApi();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run once on mount
@@ -281,8 +342,8 @@ export function useD1Schema(databaseId: string) {
   const cacheKey = `schema_${databaseId}`;
   const { executeTrackedQuery } = useD1Tracker();
   const [state, setState] = useState<AsyncState<D1TableSchema[]>>(() => {
-    const cached = useAppStore.getState().queryCache[cacheKey];
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    const cached = getQueryCacheEntry<D1TableSchema[]>(cacheKey);
+    if (cached) {
       return { status: "success", data: cached.data };
     }
     return { status: "idle" };
@@ -292,37 +353,17 @@ export function useD1Schema(databaseId: string) {
     if (!databaseId) return;
 
     if (!force) {
-      const cached = useAppStore.getState().queryCache[cacheKey];
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      const cached = getQueryCacheEntry<D1TableSchema[]>(cacheKey);
+      if (cached && isQueryCacheFresh(cached.timestamp)) {
         setState({ status: "success", data: cached.data });
         return;
       }
     }
 
-    setState({ status: "loading" });
+    const staleCache = getQueryCacheEntry<D1TableSchema[]>(cacheKey);
+    if (!staleCache) setState({ status: "loading" });
     try {
-      // Resolve account_id from the local Wrangler session.
-      const creds = await invoke<CloudflareCredentials>("get_cloudflare_token");
-
-      // account_id may not be in the config — the Rust command will
-      // auto-resolve via GET /accounts. We pass a sentinel empty string
-      // so the command falls through to its own resolution logic.
-      // Actually, execute_d1_query requires an explicit account_id.
-      // We resolve it here if absent.
-      let accountId = creds.account_id ?? "";
-      if (!accountId) {
-        // Fetch from the accounts endpoint via a known-safe Tauri channel:
-        // reuse get_cloudflare_token which already re-reads credentials.
-        // We rely on fetch_d1_databases to have been called first and the
-        // Rust side to cache nothing — so we call a lightweight accounts
-        // resolution command instead. For now we use the same hack as Rust:
-        // pass "" and let the command fail, then surface the message.
-        // A cleaner path: store accountId in useD1Databases.
-        // For this implementation, re-invoke fetch_d1_databases to warm
-        // the account id — but that's wasteful. Instead, we store accountId
-        // in a module-level ref updated by useD1Databases.
-        accountId = resolvedAccountId;
-      }
+      const accountId = getCurrentD1AccountId();
 
       const queryResults = await executeTrackedQuery(
         {
@@ -360,7 +401,11 @@ export function useD1Schema(databaseId: string) {
       useAppStore.getState().setQueryCacheItem(cacheKey, tables);
       setState({ status: "success", data: tables });
     } catch (err) {
-      setState({ status: "error", message: String(err) });
+      if (staleCache) {
+        setState({ status: "success", data: staleCache.data });
+      } else {
+        setState({ status: "error", message: String(err) });
+      }
     }
   }, [databaseId, cacheKey]);
 
@@ -369,14 +414,6 @@ export function useD1Schema(databaseId: string) {
   }, [fetch]);
 
   return { state, refresh: () => fetch(true) };
-}
-
-// Module-level store for the resolved account ID — set by useD1Databases
-// so useD1Schema can access it without an extra API call.
-let resolvedAccountId = "";
-
-export function setResolvedAccountId(id: string) {
-  resolvedAccountId = id;
 }
 
 export interface D1Index {
@@ -429,8 +466,8 @@ export function useD1TableData(
   const cacheKey = `data_${databaseId}_${tableName}_${offset}_${limit}_${sortCol}_${sortAsc}`;
   const { executeTrackedQuery } = useD1Tracker();
   const [state, setState] = useState<AsyncState<D1TableData>>(() => {
-    const cached = useAppStore.getState().queryCache[cacheKey];
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    const cached = getQueryCacheEntry<D1TableData>(cacheKey);
+    if (cached) {
       return { status: "success", data: cached.data };
     }
     return { status: "idle" };
@@ -440,16 +477,17 @@ export function useD1TableData(
     if (!databaseId || !tableName) return;
 
     if (!force) {
-      const cached = useAppStore.getState().queryCache[cacheKey];
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      const cached = getQueryCacheEntry<D1TableData>(cacheKey);
+      if (cached && isQueryCacheFresh(cached.timestamp)) {
         setState({ status: "success", data: cached.data });
         return;
       }
     }
 
-    setState({ status: "loading" });
+    const staleCache = getQueryCacheEntry<D1TableData>(cacheKey);
+    if (!staleCache) setState({ status: "loading" });
     try {
-      const accountId = resolvedAccountId;
+      const accountId = getCurrentD1AccountId();
       let orderClause = "";
       if (sortCol) {
         orderClause = ` ORDER BY "${sortCol}" ${sortAsc ? 'ASC' : 'DESC'}`;
@@ -511,9 +549,13 @@ export function useD1TableData(
         data: resultData,
       });
     } catch (err) {
-      setState({ status: "error", message: String(err) });
+      if (staleCache) {
+        setState({ status: "success", data: staleCache.data });
+      } else {
+        setState({ status: "error", message: String(err) });
+      }
     }
-  }, [databaseId, tableName, offset, sortCol, sortAsc, cacheKey]);
+  }, [databaseId, tableName, offset, limit, sortCol, sortAsc, cacheKey]);
 
   useEffect(() => {
     fetch();
@@ -529,8 +571,8 @@ export function useD1Indexes(databaseId: string) {
   const cacheKey = `indexes_${databaseId}`;
   const { executeTrackedQuery } = useD1Tracker();
   const [state, setState] = useState<AsyncState<D1Index[]>>(() => {
-    const cached = useAppStore.getState().queryCache[cacheKey];
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    const cached = getQueryCacheEntry<D1Index[]>(cacheKey);
+    if (cached) {
       return { status: "success", data: cached.data };
     }
     return { status: "idle" };
@@ -540,16 +582,17 @@ export function useD1Indexes(databaseId: string) {
     if (!databaseId) return;
 
     if (!force) {
-      const cached = useAppStore.getState().queryCache[cacheKey];
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      const cached = getQueryCacheEntry<D1Index[]>(cacheKey);
+      if (cached && isQueryCacheFresh(cached.timestamp)) {
         setState({ status: "success", data: cached.data });
         return;
       }
     }
 
-    setState({ status: "loading" });
+    const staleCache = getQueryCacheEntry<D1Index[]>(cacheKey);
+    if (!staleCache) setState({ status: "loading" });
     try {
-      const accountId = resolvedAccountId;
+      const accountId = getCurrentD1AccountId();
       const sql = "SELECT name, tbl_name as tableName, sql FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%' ORDER BY tbl_name, name;";
       
       const results = await executeTrackedQuery(
@@ -579,7 +622,11 @@ export function useD1Indexes(databaseId: string) {
       useAppStore.getState().setQueryCacheItem(cacheKey, data);
       setState({ status: "success", data });
     } catch (err) {
-      setState({ status: "error", message: String(err) });
+      if (staleCache) {
+        setState({ status: "success", data: staleCache.data });
+      } else {
+        setState({ status: "error", message: String(err) });
+      }
     }
   }, [databaseId, cacheKey]);
 

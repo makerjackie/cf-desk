@@ -1,10 +1,10 @@
 // useAppStore.ts
 //
 // Global Zustand store with localStorage persistence.
-// Caches D1 databases (and KV namespaces when implemented) so the UI
+// Caches D1 databases, D1 read snapshots, and remote resource summaries so the UI
 // renders immediately on startup without waiting for an API round-trip.
 //
-// Cache TTL: 5 minutes. After expiry the next mount re-fetches in the
+// Cache TTL: 10 minutes. After expiry the next mount re-fetches in the
 // background and silently updates the cache.
 
 import { create } from "zustand";
@@ -56,6 +56,8 @@ export interface KVNamespace {
 
 /** How long cached data is considered fresh (ms). Default: 10 minutes. */
 export const CACHE_TTL_MS = 10 * 60 * 1_000;
+export const D1_QUERY_CACHE_LIMIT = 200;
+export const REMOTE_RESOURCE_CACHE_LIMIT = 300;
 export const R2_OBJECT_LISTING_CACHE_LIMIT = 200;
 export const R2_BUCKET_DOMAIN_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 export const R2_BUCKET_DOMAIN_CACHE_LIMIT = 200;
@@ -91,6 +93,29 @@ export interface R2BucketDomainCacheEntry {
     domainsInfo: BucketDomainsInfo | null;
   };
   timestamp: number;
+}
+
+export interface TimestampedCacheEntry<T = unknown> {
+  data: T;
+  timestamp: number;
+}
+
+function trimTimestampedCache<T extends TimestampedCacheEntry>(
+  cache: Record<string, T>,
+  limit: number
+): Record<string, T> {
+  const keys = Object.keys(cache);
+  if (keys.length <= limit) return cache;
+
+  const next = { ...cache };
+  keys
+    .sort((a, b) => next[a].timestamp - next[b].timestamp)
+    .slice(0, keys.length - limit)
+    .forEach((key) => {
+      delete next[key];
+    });
+
+  return next;
 }
 
 export type R2ImageOutputFormat = "original" | "webp" | "jpeg" | "png";
@@ -172,6 +197,7 @@ interface AppState {
   r2Buckets: R2Bucket[];
   r2ObjectListings: Record<string, R2ObjectListingCacheEntry>;
   r2BucketDomains: Record<string, R2BucketDomainCacheEntry>;
+  remoteResourceCache: Record<string, TimestampedCacheEntry>;
   r2UploadSettings: Record<string, R2UploadSettings>;
   pinnedD1DatabaseIds: string[];
   pinnedR2BucketKeys: string[];
@@ -213,9 +239,11 @@ interface AppState {
   enableD1History: boolean;
   isFlagsLoading: boolean;
 
-  // ── Session Cache (Volatile, not persisted) ──
+  // ── D1 read cache ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  queryCache: Record<string, { data: any; timestamp: number }>;
+  queryCache: Record<string, TimestampedCacheEntry<any>>;
+
+  // ── Session Cache (Volatile, not persisted) ──
   sessionId: string;
 
   // ── Actions ──
@@ -260,6 +288,12 @@ interface AppState {
   /** Cache one R2 bucket's public-domain status. */
   setR2BucketDomain: (cacheKey: string, publicDomain: string | null, domainsInfo: BucketDomainsInfo | null) => void;
 
+  /** Cache one Cloudflare remote resource response for stale-while-revalidate views. */
+  setRemoteResourceCacheItem: (key: string, data: unknown) => void;
+
+  /** Clear Cloudflare remote resource cache entries by exact key or prefix. */
+  clearRemoteResourceCache: (prefix?: string) => void;
+
   /** Persist upload defaults for one account + bucket. */
   setR2UploadSettings: (cacheKey: string, settings: R2UploadSettingsPatch) => void;
 
@@ -295,6 +329,7 @@ export const useAppStore = create<AppState>()(
       r2Buckets: [],
       r2ObjectListings: {},
       r2BucketDomains: {},
+      remoteResourceCache: {},
       r2UploadSettings: {},
       pinnedD1DatabaseIds: [],
       pinnedR2BucketKeys: [],
@@ -420,6 +455,27 @@ export const useAppStore = create<AppState>()(
           return { r2BucketDomains: next };
         }),
 
+      setRemoteResourceCacheItem: (key, data) =>
+        set((state) => ({
+          remoteResourceCache: trimTimestampedCache(
+            {
+              ...state.remoteResourceCache,
+              [key]: { data, timestamp: Date.now() },
+            },
+            REMOTE_RESOURCE_CACHE_LIMIT
+          ),
+        })),
+
+      clearRemoteResourceCache: (prefix) =>
+        set((state) => {
+          if (!prefix) return { remoteResourceCache: {} };
+          const next = { ...state.remoteResourceCache };
+          for (const key of Object.keys(next)) {
+            if (key === prefix || key.startsWith(prefix)) delete next[key];
+          }
+          return { remoteResourceCache: next };
+        }),
+
       setR2UploadSettings: (cacheKey, settings) =>
         set((state) => ({
           r2UploadSettings: {
@@ -458,6 +514,7 @@ export const useAppStore = create<AppState>()(
           r2Buckets: [],
           r2ObjectListings: {},
           r2BucketDomains: {},
+          remoteResourceCache: {},
           lastFetched: null,
           kvLastFetched: null,
           r2LastFetched: null,
@@ -466,10 +523,13 @@ export const useAppStore = create<AppState>()(
 
       setQueryCacheItem: (key, data) =>
         set((state) => ({
-          queryCache: {
-            ...state.queryCache,
-            [key]: { data, timestamp: Date.now() },
-          },
+          queryCache: trimTimestampedCache(
+            {
+              ...state.queryCache,
+              [key]: { data, timestamp: Date.now() },
+            },
+            D1_QUERY_CACHE_LIMIT
+          ),
         })),
 
       clearQueryCache: (prefix) =>
@@ -525,12 +585,14 @@ export const useAppStore = create<AppState>()(
         r2Buckets: state.r2Buckets,
         r2ObjectListings: state.r2ObjectListings,
         r2BucketDomains: state.r2BucketDomains,
+        remoteResourceCache: state.remoteResourceCache,
         r2UploadSettings: state.r2UploadSettings,
         pinnedD1DatabaseIds: state.pinnedD1DatabaseIds,
         pinnedR2BucketKeys: state.pinnedR2BucketKeys,
         lastFetched: state.lastFetched,
         kvLastFetched: state.kvLastFetched,
         r2LastFetched: state.r2LastFetched,
+        queryCache: state.queryCache,
       }),
     }
   )

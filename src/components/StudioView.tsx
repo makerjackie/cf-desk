@@ -246,19 +246,19 @@ export function StudioView({ onNavigate, onOpenCommandPalette }: StudioViewProps
     toast({ title: ui.copied, description: ui.copiedDesc });
   };
 
-  const loadRemoteResources = useCallback(async () => {
+  const loadRemoteResources = useCallback(async (force = false) => {
     setRemoteStatus("loading");
     setRemoteError(null);
     try {
+      const cacheOptions = { force, fallbackOnError: !force };
       const [workersData, kvData, queuesData] = await Promise.all([
-        fetchWorkersOverview(),
-        fetchKVNamespaces(),
-        fetchQueuesOverview(),
+        fetchWorkersOverview(cacheOptions),
+        fetchKVNamespaces(cacheOptions),
+        fetchQueuesOverview(cacheOptions),
       ]);
       setWorkers(workersData);
       setKV(kvData);
       setQueues(queuesData);
-      useAppStore.getState().setKvNamespaces(kvData);
       setRemoteStatus("idle");
     } catch (error) {
       setRemoteError(String(error));
@@ -273,7 +273,7 @@ export function StudioView({ onNavigate, onOpenCommandPalette }: StudioViewProps
   const refreshAll = () => {
     d1.refresh();
     r2.refresh();
-    loadRemoteResources();
+    loadRemoteResources(true);
   };
 
   const d1Freshness = getCacheFreshness(lastFetched, CACHE_TTL_MS);

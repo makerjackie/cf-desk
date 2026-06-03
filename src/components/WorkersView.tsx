@@ -1288,11 +1288,11 @@ export function WorkersView({ onNavigate }: WorkersViewProps) {
   const [detailStatus, setDetailStatus] = useState<"idle" | "loading" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const loadOverview = useCallback(async () => {
+  const loadOverview = useCallback(async (force = false) => {
     setStatus("loading");
     setError(null);
     try {
-      const data = await fetchWorkersOverview();
+      const data = await fetchWorkersOverview({ force, fallbackOnError: !force });
       setOverview(data);
       setSelectedWorker((current) => current ?? data.workers[0]?.name ?? null);
       setStatus("idle");
@@ -1302,11 +1302,11 @@ export function WorkersView({ onNavigate }: WorkersViewProps) {
     }
   }, []);
 
-  const loadDetail = useCallback(async (workerName: string) => {
+  const loadDetail = useCallback(async (workerName: string, force = false) => {
     setDetailStatus("loading");
     setError(null);
     try {
-      const data = await fetchWorkerDetail(workerName);
+      const data = await fetchWorkerDetail(workerName, { force, fallbackOnError: !force });
       setDetail(data);
       setDetailStatus("idle");
     } catch (loadError) {
@@ -1354,7 +1354,7 @@ export function WorkersView({ onNavigate }: WorkersViewProps) {
             <ExternalLink size={15} className="mr-2" />
             {t("common.docs")}
           </Button>
-          <Button variant="outline" onClick={loadOverview} disabled={status === "loading"}>
+          <Button variant="outline" onClick={() => loadOverview(true)} disabled={status === "loading"}>
             {status === "loading" ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RefreshCw size={15} className="mr-2" />}
             {t("common.refresh")}
           </Button>
@@ -1434,7 +1434,7 @@ export function WorkersView({ onNavigate }: WorkersViewProps) {
             loading={detailStatus === "loading"}
             onRefresh={() => {
               if (selectedWorker) {
-                loadDetail(selectedWorker);
+                loadDetail(selectedWorker, true);
               }
             }}
             onNavigate={onNavigate}
