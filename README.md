@@ -41,19 +41,17 @@ The v1.3.0 release adds CFDesk Home, the command center, keyboard shortcuts, cac
 
 The v1.3.1 release hardens export safety, R2 asset utilities, Workers and Queues metric parsing, localization coverage, and release metadata validation. It also expands the focused Vitest suite around these boundaries.
 
+## v1.3.2 Signed macOS Release
+
+The v1.3.2 release adds the macOS Developer ID signing and notarization path. Apple Silicon DMGs are signed, notarized, and stapled so Gatekeeper can verify CFDesk without manual quarantine workarounds.
+
 ## Install / Update
 
 This fork publishes builds through [GitHub Releases](https://github.com/makerjackie/cf-desk/releases). The release workflow builds the Tauri app from `main` when a release commit is pushed.
 
 ### macOS Gatekeeper
 
-CFDesk is currently distributed without Apple signing or notarization. If macOS blocks the app after installation, move `CFDesk.app` to `/Applications`, then run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/CFDesk.app
-```
-
-Then open the app again from Finder or Spotlight.
+CFDesk macOS Apple Silicon releases are signed with Developer ID and notarized by Apple. macOS may still show the normal first-open confirmation for downloaded apps, but users should not need quarantine removal commands for notarized release packages.
 
 ## Local Development
 

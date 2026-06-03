@@ -7,13 +7,25 @@ TEAM_ID="${CFDESK_APPLE_TEAM_ID:-PCJ84YD7HQ}"
 SIGNING_IDENTITY="${CFDESK_SIGNING_IDENTITY:-Developer ID Application: Freedom Dimension (shenzhen) Technology Co., Ltd (${TEAM_ID})}"
 NOTARY_PROFILE="${CFDESK_NOTARY_PROFILE:-cfdesk-notary}"
 NOTARY_TIMEOUT="${CFDESK_NOTARY_TIMEOUT:-30m}"
+TARGET_TRIPLE="${CFDESK_TARGET_TRIPLE:-aarch64-apple-darwin}"
+ARCH_NAME="${CFDESK_ARCH_NAME:-aarch64}"
 
-APP_SOURCE="${CFDESK_APP_SOURCE:-${ROOT_DIR}/src-tauri/target/release/bundle/macos/${APP_NAME}.app}"
-SIGNED_DIR="${CFDESK_SIGNED_DIR:-${ROOT_DIR}/src-tauri/target/release/bundle/signed}"
+DEFAULT_APP_SOURCE="${ROOT_DIR}/src-tauri/target/${TARGET_TRIPLE}/release/bundle/macos/${APP_NAME}.app"
+FALLBACK_APP_SOURCE="${ROOT_DIR}/src-tauri/target/release/bundle/macos/${APP_NAME}.app"
+
+if [ -n "${CFDESK_APP_SOURCE:-}" ]; then
+  APP_SOURCE="$CFDESK_APP_SOURCE"
+elif [ -d "$DEFAULT_APP_SOURCE" ]; then
+  APP_SOURCE="$DEFAULT_APP_SOURCE"
+else
+  APP_SOURCE="$FALLBACK_APP_SOURCE"
+fi
+
+SIGNED_DIR="${CFDESK_SIGNED_DIR:-${ROOT_DIR}/src-tauri/target/${TARGET_TRIPLE}/release/bundle/signed}"
 STAGING_DIR="${SIGNED_DIR}/root"
 SIGNED_APP="${STAGING_DIR}/${APP_NAME}.app"
 VERSION=$(node -e "console.log(require('${ROOT_DIR}/package.json').version)")
-SIGNED_DMG="${SIGNED_DIR}/${APP_NAME}_${VERSION}_aarch64_signed.dmg"
+SIGNED_DMG="${SIGNED_DIR}/${APP_NAME}_${VERSION}_${ARCH_NAME}_signed.dmg"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then

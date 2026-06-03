@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.3.2",
+    "date": "2026-06-03",
+    "features": [
+      "Added a reusable macOS Developer ID signing and notarization helper",
+      "Published a notarized macOS Apple Silicon DMG for Gatekeeper-friendly installs"
+    ],
+    "featuresZh": [
+      "新增可复用的 macOS Developer ID 签名和公证辅助脚本",
+      "发布已公证的 macOS Apple Silicon DMG，减少 Gatekeeper 安装阻断"
+    ],
+    "fixes": [
+      "Replaced the unsigned macOS distribution path with a signed and stapled release package"
+    ],
+    "fixesZh": [
+      "将未签名 macOS 分发路径替换为已签名并 staple 票据的发布包"
+    ]
+  },
+  {
     "version": "1.3.1",
     "date": "2026-05-31",
     "features": [

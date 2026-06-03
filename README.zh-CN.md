@@ -39,6 +39,14 @@ v1.3.0 增加 CFDesk Home、命令中心、快捷键、缓存新鲜度、工作�
 
 v1.3.1 强化导出安全、R2 素材工具、Workers 和 Queues 指标解析、本地化覆盖，以及 release metadata 校验。同时扩展了这些边界的 Vitest 测试。
 
+## v1.3.2 已签名 macOS 发布
+
+v1.3.2 增加 macOS Developer ID 签名和公证流程。Apple Silicon DMG 已完成签名、公证和票据 stapling，Gatekeeper 可以直接校验 CFDesk，不再需要手动移除 quarantine。
+
+## 安装 / 更新
+
+CFDesk 通过 [GitHub Releases](https://github.com/makerjackie/cf-desk/releases) 发布构建产物。macOS Apple Silicon 版本已经使用 Developer ID 签名并通过 Apple 公证。用户首次打开从互联网下载的 App 时，macOS 仍可能显示正常确认，但已公证发布包不需要执行 quarantine 移除命令。
+
 ## 本地开发
 
 准备环境：
